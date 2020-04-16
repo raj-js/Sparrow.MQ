@@ -1,7 +1,7 @@
 ﻿using RabbitMQ.Client;
 using System;
 
-namespace HiDoc.BuildingBlock.EventBus.RabbitMQ
+namespace Sparrow.EventBus.RabbitMQ
 {
     public interface IRabbitMQPersistentConnection
         : IDisposable

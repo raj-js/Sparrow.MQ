@@ -1,22 +1,18 @@
-﻿using Autofac;
-using HiDoc.BuildingBlock.EventBus;
-using HiDoc.BuildingBlock.EventBus.Abstractions;
-using HiDoc.BuildingBlock.EventBus.Events;
-using HiDoc.BuildingBlock.EventBus.Extensions;
-using Microsoft.Extensions.Logging;
-using Newtonsoft.Json;
-using Newtonsoft.Json.Linq;
+﻿using Microsoft.Extensions.Logging;
 using Polly;
-using Polly.Retry;
 using RabbitMQ.Client;
 using RabbitMQ.Client.Events;
 using RabbitMQ.Client.Exceptions;
+using Sparrow.EventBus.Abstractions;
+using Sparrow.EventBus.Events;
+using Sparrow.EventBus.Extensions;
 using System;
 using System.Net.Sockets;
 using System.Text;
 using System.Threading.Tasks;
+using MessagePack;
 
-namespace HiDoc.BuildingBlock.EventBus.RabbitMQ
+namespace Sparrow.EventBus.RabbitMQ
 {
     /// <summary>
     /// RabbitMQ 事件总线
@@ -25,22 +21,21 @@ namespace HiDoc.BuildingBlock.EventBus.RabbitMQ
     {
         const string BROKER_NAME = "hidoc_event_bus";
 
-         readonly IRabbitMQPersistentConnection _persistentConnection;
-         readonly ILogger<EventBusRabbitMQ> _logger;
-         readonly IEventBusSubscriptionsManager _subsManager;
-         readonly ILifetimeScope _autofac;
-         readonly string AUTOFAC_SCOPE_NAME = "hidoc_event_bus";
-         readonly int _retryCount;
+        readonly IRabbitMQPersistentConnection _persistentConnection;
+        readonly ILogger<EventBusRabbitMQ> _logger;
+        readonly IEventBusSubscriptionsManager _subsManager;
+        readonly IServiceProvider _serviceProvider;
+        readonly int _retryCount;
 
-         IModel _consumerChannel;
-         string _queueName;
+        IModel _consumerChannel;
+        string _queueName;
 
         public EventBusRabbitMQ(
-            IRabbitMQPersistentConnection persistentConnection, 
+            IRabbitMQPersistentConnection persistentConnection,
             ILogger<EventBusRabbitMQ> logger,
-            ILifetimeScope autofac, 
-            IEventBusSubscriptionsManager subsManager, 
-            string queueName = null, 
+            IServiceProvider serviceProvider,
+            IEventBusSubscriptionsManager subsManager,
+            string queueName = null,
             int retryCount = 5)
         {
             _persistentConnection = persistentConnection ?? throw new ArgumentNullException(nameof(persistentConnection));
@@ -48,12 +43,12 @@ namespace HiDoc.BuildingBlock.EventBus.RabbitMQ
             _subsManager = subsManager ?? throw new ArgumentNullException(nameof(subsManager));
             _queueName = queueName;
             _consumerChannel = CreateConsumerChannel();
-            _autofac = autofac;
+            _serviceProvider = serviceProvider;
             _retryCount = retryCount;
             _subsManager.OnEventRemoved += SubsManager_OnEventRemoved;
         }
 
-         void SubsManager_OnEventRemoved(object sender, string eventName)
+        void SubsManager_OnEventRemoved(object sender, string eventName)
         {
             if (!_persistentConnection.IsConnected)
                 _persistentConnection.TryConnect();
@@ -89,15 +84,13 @@ namespace HiDoc.BuildingBlock.EventBus.RabbitMQ
 
             channel.ExchangeDeclare(exchange: BROKER_NAME, type: "direct");
 
-            var message = JsonConvert.SerializeObject(@event);
-            var body = Encoding.UTF8.GetBytes(message);
-
+            var body = MessagePackSerializer.Serialize(@event);
             policy.Execute(() =>
             {
                 var properties = channel.CreateBasicProperties();
                 properties.DeliveryMode = 2; // persistent
 
-                    _logger.LogTrace("Publishing event to RabbitMQ: {EventId}", @event.Id);
+                _logger.LogTrace("Publishing event to RabbitMQ: {EventId}", @event.Id);
 
                 channel.BasicPublish(
                     exchange: BROKER_NAME,
@@ -131,7 +124,7 @@ namespace HiDoc.BuildingBlock.EventBus.RabbitMQ
             StartBasicConsume();
         }
 
-         void DoInternalSubscription(string eventName)
+        void DoInternalSubscription(string eventName)
         {
             var containsKey = _subsManager.HasSubscriptionsForEvent(eventName);
             if (!containsKey)
@@ -177,7 +170,7 @@ namespace HiDoc.BuildingBlock.EventBus.RabbitMQ
             _subsManager.Clear();
         }
 
-         void StartBasicConsume()
+        void StartBasicConsume()
         {
             _logger.LogTrace("Starting RabbitMQ basic consume");
 
@@ -198,23 +191,16 @@ namespace HiDoc.BuildingBlock.EventBus.RabbitMQ
             }
         }
 
-         async Task Consumer_Received(object sender, BasicDeliverEventArgs eventArgs)
+        async Task Consumer_Received(object sender, BasicDeliverEventArgs eventArgs)
         {
             var eventName = eventArgs.RoutingKey;
-            var message = Encoding.UTF8.GetString(eventArgs.Body);
-
             try
             {
-                if (message.ToLowerInvariant().Contains("throw-fake-exception"))
-                {
-                    throw new InvalidOperationException($"Fake exception requested: \"{message}\"");
-                }
-
-                await ProcessEvent(eventName, message);
+                await ProcessEvent(eventName, eventArgs.Body);
             }
             catch (Exception ex)
             {
-                _logger.LogWarning(ex, "----- ERROR Processing message \"{Message}\"", message);
+                _logger.LogWarning(ex, "----- ERROR Processing message \"{Message}\"", eventArgs);
             }
 
             // Even on exception we take the message off the queue.
@@ -223,7 +209,7 @@ namespace HiDoc.BuildingBlock.EventBus.RabbitMQ
             _consumerChannel.BasicAck(eventArgs.DeliveryTag, multiple: false);
         }
 
-         IModel CreateConsumerChannel()
+        IModel CreateConsumerChannel()
         {
             if (!_persistentConnection.IsConnected)
             {
@@ -235,7 +221,7 @@ namespace HiDoc.BuildingBlock.EventBus.RabbitMQ
             var channel = _persistentConnection.CreateModel();
 
             channel.ExchangeDeclare(exchange: BROKER_NAME,
-                                    type: "direct");
+                                    type: ExchangeType.Direct);
 
             channel.QueueDeclare(queue: _queueName,
                                  durable: true,
@@ -255,36 +241,33 @@ namespace HiDoc.BuildingBlock.EventBus.RabbitMQ
             return channel;
         }
 
-         async Task ProcessEvent(string eventName, string message)
+        async Task ProcessEvent(string eventName, byte[] message)
         {
             _logger.LogTrace("Processing RabbitMQ event: {EventName}", eventName);
 
             if (_subsManager.HasSubscriptionsForEvent(eventName))
             {
-                using (var scope = _autofac.BeginLifetimeScope(AUTOFAC_SCOPE_NAME))
+                var subscriptions = _subsManager.GetHandlersForEvent(eventName);
+                foreach (var subscription in subscriptions)
                 {
-                    var subscriptions = _subsManager.GetHandlersForEvent(eventName);
-                    foreach (var subscription in subscriptions)
+                    if (subscription.IsDynamic)
                     {
-                        if (subscription.IsDynamic)
-                        {
-                            if (!(scope.ResolveOptional(subscription.HandlerType) is IDynamicIntegrationEventHandler handler)) continue;
+                        if (!(_serviceProvider.GetService(subscription.HandlerType) is IDynamicIntegrationEventHandler handler)) continue;
 
-                            await Task.Yield();
-                            Task handleTask = handler.Handle(JObject.Parse(message)); 
-                            await handleTask;
-                        }
-                        else
-                        {
-                            var handler = scope.ResolveOptional(subscription.HandlerType);
-                            if (handler == null) continue;
-                            var eventType = _subsManager.GetEventTypeByName(eventName);
-                            var integrationEvent = JsonConvert.DeserializeObject(message, eventType);
-                            var concreteType = typeof(IIntegrationEventHandler<>).MakeGenericType(eventType);
+                        await Task.Yield();
+                        Task handleTask = handler.Handle(MessagePackSerializer.Deserialize<dynamic>(message));
+                        await handleTask;
+                    }
+                    else
+                    {
+                        var handler = _serviceProvider.GetService(subscription.HandlerType);
+                        if (handler == null) continue;
+                        var eventType = _subsManager.GetEventTypeByName(eventName);
+                        var integrationEvent = MessagePackSerializer.Deserialize(eventType, message);
+                        var concreteType = typeof(IIntegrationEventHandler<>).MakeGenericType(eventType);
 
-                            await Task.Yield();
-                            await (Task)concreteType.GetMethod("Handle").Invoke(handler, new object[] { integrationEvent });
-                        }
+                        await Task.Yield();
+                        await (Task)concreteType.GetMethod("Handle").Invoke(handler, new object[] { integrationEvent });
                     }
                 }
             }

@@ -1,6 +1,6 @@
 ﻿using System;
 
-namespace HiDoc.BuildingBlock.EventBus
+namespace Sparrow.EventBus
 {
     public partial class InMemoryEventBusSubscriptionsManager : IEventBusSubscriptionsManager
     {
@@ -13,7 +13,7 @@ namespace HiDoc.BuildingBlock.EventBus
 
             public Type HandlerType { get; }
 
-             SubscriptionInfo(bool isDynamic, Type handlerType)
+            SubscriptionInfo(bool isDynamic, Type handlerType)
             {
                 IsDynamic = isDynamic;
                 HandlerType = handlerType;

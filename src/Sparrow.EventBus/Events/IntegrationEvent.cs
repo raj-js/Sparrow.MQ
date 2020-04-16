@@ -1,7 +1,6 @@
-﻿using Newtonsoft.Json;
-using System;
+﻿using System;
 
-namespace HiDoc.BuildingBlock.EventBus.Events
+namespace Sparrow.EventBus.Events
 {
     /// <summary>
     /// 事件
@@ -14,7 +13,6 @@ namespace HiDoc.BuildingBlock.EventBus.Events
             CreationTime = DateTime.UtcNow;
         }
 
-        [JsonConstructor]
         public IntegrationEvent(Guid id, DateTime createDate)
         {
             Id = id;
@@ -24,13 +22,11 @@ namespace HiDoc.BuildingBlock.EventBus.Events
         /// <summary>
         /// 事件唯一标识
         /// </summary>
-        [JsonProperty]
         public Guid Id { get;  set; }
 
         /// <summary>
         /// 创建时间
         /// </summary>
-        [JsonProperty]
         public DateTime CreationTime { get;  set; }
     }
 }

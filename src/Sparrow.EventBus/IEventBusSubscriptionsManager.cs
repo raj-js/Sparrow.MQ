@@ -1,10 +1,10 @@
-﻿using HiDoc.BuildingBlock.EventBus.Abstractions;
-using HiDoc.BuildingBlock.EventBus.Events;
+﻿using Sparrow.EventBus.Events;
+using Sparrow.EventBus.Abstractions;
 using System;
 using System.Collections.Generic;
-using static HiDoc.BuildingBlock.EventBus.InMemoryEventBusSubscriptionsManager;
+using static Sparrow.EventBus.InMemoryEventBusSubscriptionsManager;
 
-namespace HiDoc.BuildingBlock.EventBus
+namespace Sparrow.EventBus
 {
     /// <summary>
     /// 事件订阅者管理器

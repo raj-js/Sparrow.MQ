@@ -3,7 +3,7 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Threading.Tasks;
 
-namespace HiDoc.BuildingBlock.EventBus.Extensions
+namespace Sparrow.EventBus.Extensions
 {
     /// <summary>
     /// 获取泛型类型名称

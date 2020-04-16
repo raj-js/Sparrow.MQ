@@ -1,6 +1,6 @@
 ﻿using System.Threading.Tasks;
 
-namespace HiDoc.BuildingBlock.EventBus.Abstractions
+namespace Sparrow.EventBus.Abstractions
 {
     /// <summary>
     /// 动态事件（内容）处理者

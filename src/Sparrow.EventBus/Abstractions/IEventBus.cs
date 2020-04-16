@@ -1,7 +1,8 @@
-﻿using HiDoc.BuildingBlock.EventBus.Events;
+﻿using Sparrow.EventBus.Events;
+using Sparrow.EventBus.Abstractions;
 using System;
 
-namespace HiDoc.BuildingBlock.EventBus.Abstractions
+namespace Sparrow.EventBus.Abstractions
 {
     /// <summary>
     /// 事件总线
